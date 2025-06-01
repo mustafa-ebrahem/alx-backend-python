@@ -1,11 +1,12 @@
 from django.shortcuts import render
-from rest_framework import viewsets, status, permissions
+from rest_framework import viewsets, status, permissions, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 from django.shortcuts import get_object_or_404
-from django.db.models import Q
+from django.db.models import Q, Count
 from django.contrib.auth import get_user_model
+from django_filters.rest_framework import DjangoFilterBackend
 from .models import Conversation, Message
 from .serializers import (
     ConversationSerializer,
@@ -32,6 +33,11 @@ class ConversationViewSet(viewsets.ModelViewSet):
     """
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = MessagePagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['created_at']
+    search_fields = ['participants__username', 'participants__email', 'participants__first_name', 'participants__last_name']
+    ordering_fields = ['created_at']
+    ordering = ['-created_at']
 
     def get_queryset(self):
         """
@@ -60,7 +66,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
         
         # Add the current user as a participant
         participant_ids = request.data.get('participant_ids', [])
-        if request.user.user_id not in participant_ids:
+        if str(request.user.user_id) not in participant_ids:
             participant_ids.append(str(request.user.user_id))
         
         # Validate participants exist
@@ -76,7 +82,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
             existing_conversation = Conversation.objects.filter(
                 participants__user_id__in=participant_ids
             ).annotate(
-                participant_count=models.Count('participants')
+                participant_count=Count('participants')
             ).filter(participant_count=2)
             
             if existing_conversation.exists():
@@ -217,6 +223,11 @@ class MessageViewSet(viewsets.ModelViewSet):
     """
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = MessagePagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['sent_at', 'sender', 'conversation']
+    search_fields = ['message_body', 'sender__username', 'sender__email']
+    ordering_fields = ['sent_at']
+    ordering = ['sent_at']
 
     def get_queryset(self):
         """
