@@ -8,8 +8,9 @@ router = DefaultRouter()
 router.register(r'conversations', ConversationViewSet, basename='conversation')
 router.register(r'messages', MessageViewSet, basename='message')
 
+# The API URLs are now determined automatically by the router
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/', include('chats.urls')),
+    path('api/', include(router.urls)),
     path('', include(router.urls)),
 ]
