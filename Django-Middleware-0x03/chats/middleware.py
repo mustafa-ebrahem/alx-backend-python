@@ -7,6 +7,7 @@ from django.conf import settings
 from django.utils.deprecation import MiddlewareMixin
 from django.http import HttpResponseForbidden
 from django.utils import timezone
+from django.urls import resolve
 
 class RequestLoggingMiddleware(MiddlewareMixin):
     """
@@ -442,3 +443,76 @@ class OffensiveLanguageMiddleware:
         else:
             ip = request.META.get('REMOTE_ADDR')
         return ip
+
+
+class RolepermissionMiddleware:
+    """
+    Middleware to check user's role before allowing access to specific admin actions.
+    Only users with admin or moderator roles are allowed to access protected paths.
+    """
+    
+    def __init__(self, get_response):
+        """
+        Initialize the middleware with role-based access control.
+        """
+        self.get_response = get_response
+        
+        # Define protected paths that require admin/moderator access
+        self.protected_paths = [
+            '/admin/',
+            '/dashboard/',
+            '/manage/',
+            '/chats/delete/',
+            '/chats/moderate/',
+            '/users/manage/',
+            '/api/admin/',
+            '/reports/',
+        ]
+    
+    def __call__(self, request):
+        """
+        Process the request and check for role-based permissions.
+        """
+        # Check if the path is protected
+        if any(request.path.startswith(protected) for protected in self.protected_paths):
+            # Check user's role
+            user = request.user
+            
+            # Check if user is authenticated and has proper permissions
+            if not self._has_admin_permissions(user):
+                # Return 403 Forbidden response
+                from django.http import HttpResponseForbidden
+                return HttpResponseForbidden(
+                    "Access denied: You must be an admin or moderator to access this resource."
+                )
+        
+        # Process the request if authorized or not a protected path
+        return self.get_response(request)
+    
+    def _has_admin_permissions(self, user):
+        """
+        Check if the user has admin or moderator permissions.
+        """
+        # Check if user is authenticated
+        if not user.is_authenticated:
+            return False
+            
+        # Check if user is superuser (admin)
+        if user.is_superuser:
+            return True
+            
+        # Check if user is staff
+        if user.is_staff:
+            return True
+            
+        # Check if user has specific groups
+        if hasattr(user, 'groups'):
+            user_groups = user.groups.values_list('name', flat=True)
+            if 'moderator' in user_groups or 'admin' in user_groups:
+                return True
+        
+        # Check for custom role field if it exists
+        if hasattr(user, 'role'):
+            return user.role in ['admin', 'moderator']
+            
+        return False
