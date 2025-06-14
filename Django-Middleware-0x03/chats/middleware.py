@@ -3,6 +3,8 @@ import os
 from datetime import datetime
 from django.conf import settings
 from django.utils.deprecation import MiddlewareMixin
+from django.http import HttpResponseForbidden
+from django.utils import timezone
 
 class RequestLoggingMiddleware(MiddlewareMixin):
     """
@@ -232,3 +234,81 @@ class APIRequestLoggingMiddleware(MiddlewareMixin):
         response = self.get_response(request)
         
         return response
+
+
+class RestrictAccessByTimeMiddleware:
+    """
+    Middleware to restrict access to the messaging app during certain hours of the day.
+    Only allows access between 9PM (21:00) and 6PM (18:00) the next day.
+    """
+    
+    def __init__(self, get_response):
+        """
+        Initialize the middleware.
+        """
+        self.get_response = get_response
+        self.logger = self._setup_logger()
+    
+    def _setup_logger(self):
+        """
+        Set up a logger for the access restriction middleware.
+        """
+        # Create logs directory if it doesn't exist
+        log_dir = os.path.join(settings.BASE_DIR, 'logs')
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        
+        # Set up the logger
+        logger = logging.getLogger('access_restriction_logger')
+        logger.setLevel(logging.INFO)
+        
+        # Avoid adding multiple handlers if the logger already exists
+        if not logger.handlers:
+            # Create file handler
+            log_file_path = os.path.join(log_dir, 'access_restrictions.log')
+            file_handler = logging.FileHandler(log_file_path)
+            file_handler.setLevel(logging.INFO)
+            
+            # Create formatter
+            formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+            file_handler.setFormatter(formatter)
+            
+            # Add handler to logger
+            logger.addHandler(file_handler)
+        
+        return logger
+    
+    def __call__(self, request):
+        """
+        Process the request and check if access is allowed based on current time.
+        
+        Access is restricted outside the hours of 9PM (21:00) to 6PM (18:00).
+        """
+        # Get current hour in 24-hour format
+        current_time = timezone.localtime(timezone.now())
+        current_hour = current_time.hour
+        
+        # Define allowed hours (9PM to 6PM next day)
+        # This means hours 21, 22, 23, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18
+        allowed_start = 21  # 9PM
+        allowed_end = 18    # 6PM
+        
+        # Check if current hour is outside allowed range
+        # If current hour is less than allowed_start (21) AND greater than allowed_end (18)
+        if current_hour < allowed_start and current_hour > allowed_end:
+            # User identification for logging
+            user_info = "Anonymous"
+            if hasattr(request, 'user') and request.user.is_authenticated:
+                user_info = request.user.username or f"User({request.user.id})"
+            
+            # Log the restricted access attempt
+            self.logger.warning(
+                f"Access attempt outside allowed hours by {user_info} from {request.META.get('REMOTE_ADDR')} - "
+                f"Current time: {current_time.strftime('%H:%M:%S')}"
+            )
+            
+            # Return 403 Forbidden response
+            return HttpResponseForbidden("Access to the messaging app is restricted between 6PM and 9PM. Please try again during allowed hours.")
+        
+        # Process the request if within allowed hours
+        return self.get_response(request)
