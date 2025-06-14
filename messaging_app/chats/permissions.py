@@ -1,0 +1,62 @@
+from rest_framework import permissions
+from rest_framework.permissions import BasePermission
+
+class IsOwnerOrReadOnly(BasePermission):
+    """
+    Custom permission to only allow owners of an object to edit it.
+    """
+    def has_object_permission(self, request, view, obj):
+        # Read permissions are allowed to any request,
+        # so we'll always allow GET, HEAD or OPTIONS requests.
+        if request.method in permissions.SAFE_METHODS:
+            return True
+
+        # Write permissions are only allowed to the owner of the object.
+        return obj.user == request.user
+
+class IsParticipantOfConversation(BasePermission):
+    """
+    Custom permission to only allow participants of a conversation to access it.
+    """
+    def has_object_permission(self, request, view, obj):
+        # Check if user is a participant in the conversation
+        return request.user in obj.participants.all()
+
+class IsMessageOwner(BasePermission):
+    """
+    Custom permission to only allow message owners to edit/delete their messages.
+    """
+    def has_object_permission(self, request, view, obj):
+        # Allow read access to conversation participants
+        if request.method in permissions.SAFE_METHODS:
+            return request.user in obj.conversation.participants.all()
+        
+        # Write permissions only for message owner
+        return obj.sender == request.user
+
+class IsConversationParticipant(BasePermission):
+    """
+    Custom permission to check if user is participant in conversation for nested routes.
+    """
+    def has_permission(self, request, view):
+        # For nested routes, check if user is participant of parent conversation
+        conversation_id = view.kwargs.get('conversation_pk')
+        if conversation_id:
+            from .models import Conversation
+            try:
+                conversation = Conversation.objects.get(id=conversation_id)
+                return request.user in conversation.participants.all()
+            except Conversation.DoesNotExist:
+                return False
+        return True
+
+class IsAuthenticatedAndActive(BasePermission):
+    """
+    Custom permission to check if user is authenticated and active.
+    """
+    def has_permission(self, request, view):
+        return (
+            request.user and
+            request.user.is_authenticated and
+            request.user.is_active
+        )
