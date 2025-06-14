@@ -1,0 +1,4 @@
+2024-06-14 10:30:15.123456 - User: testuser - Path: /api/conversations/
+2024-06-14 10:30:20.234567 - User: Anonymous - Path: /api/auth/login/
+2024-06-14 10:30:25.345678 - User: john_doe - Path: /api/messages/
+2024-06-14 10:30:30.456789 - User: User(a1b2c3d4-e5f6-7890-abcd-ef1234567890) - Path: /api/conversations/123/messages/
