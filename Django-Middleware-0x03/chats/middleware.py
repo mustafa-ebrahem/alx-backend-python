@@ -1,6 +1,8 @@
 import logging
 import os
+import time
 from datetime import datetime
+from collections import defaultdict
 from django.conf import settings
 from django.utils.deprecation import MiddlewareMixin
 from django.http import HttpResponseForbidden
@@ -312,3 +314,131 @@ class RestrictAccessByTimeMiddleware:
         
         # Process the request if within allowed hours
         return self.get_response(request)
+
+
+class OffensiveLanguageMiddleware:
+    """
+    Middleware to limit the number of messages a user can send within a time window based on IP address.
+    """
+    
+    def __init__(self, get_response):
+        """
+        Initialize the middleware with IP tracking and rate limiting.
+        """
+        self.get_response = get_response
+        # Store message counts per IP: {ip: [(timestamp1, count1), (timestamp2, count2), ...]}
+        self.ip_message_counts = defaultdict(list)
+        # Configure rate limits
+        self.time_window = 60  # Time window in seconds (1 minute)
+        self.max_messages = 5  # Maximum messages per time window
+        # Set up logging
+        self.logger = self._setup_logger()
+    
+    def _setup_logger(self):
+        """
+        Set up a logger for rate limiting events.
+        """
+        # Create logs directory if it doesn't exist
+        log_dir = os.path.join(settings.BASE_DIR, 'logs')
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        
+        # Set up the logger
+        logger = logging.getLogger('rate_limiting_logger')
+        logger.setLevel(logging.INFO)
+        
+        # Avoid adding multiple handlers if the logger already exists
+        if not logger.handlers:
+            # Create file handler
+            log_file_path = os.path.join(log_dir, 'rate_limiting.log')
+            file_handler = logging.FileHandler(log_file_path)
+            file_handler.setLevel(logging.INFO)
+            
+            # Create formatter
+            formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+            file_handler.setFormatter(formatter)
+            
+            # Add handler to logger
+            logger.addHandler(file_handler)
+        
+        return logger
+    
+    def _clean_expired_entries(self, ip):
+        """
+        Remove message counts that are outside the current time window.
+        """
+        current_time = time.time()
+        self.ip_message_counts[ip] = [
+            (timestamp, count) for timestamp, count in self.ip_message_counts[ip]
+            if current_time - timestamp < self.time_window
+        ]
+    
+    def _is_rate_limited(self, ip):
+        """
+        Check if an IP address has exceeded the message rate limit.
+        """
+        # Clean up expired entries first
+        self._clean_expired_entries(ip)
+        
+        # Count total messages within the window
+        total_messages = sum(count for _, count in self.ip_message_counts[ip])
+        
+        return total_messages >= self.max_messages
+    
+    def _is_chat_post_request(self, request):
+        """
+        Determines if the request is a POST request to send a chat message.
+        """
+        # Check if this is a POST request to chat-related URLs
+        # Adjust the URL patterns according to your application's URL structure
+        is_post = request.method == 'POST'
+        is_chat_url = any(path in request.path for path in [
+            '/chats/', '/messages/', '/send_message/', '/api/messages/'
+        ])
+        
+        return is_post and is_chat_url
+    
+    def __call__(self, request):
+        """
+        Process the request and check for rate limiting.
+        """
+        # Only apply rate limiting to chat message POST requests
+        if self._is_chat_post_request(request):
+            # Get the client's IP address
+            ip = self._get_client_ip(request)
+            
+            # Check if this IP has reached the rate limit
+            if self._is_rate_limited(ip):
+                # Log the rate limit event
+                user_info = "Anonymous"
+                if hasattr(request, 'user') and request.user.is_authenticated:
+                    user_info = request.user.username or f"User({request.user.id})"
+                
+                self.logger.warning(
+                    f"Rate limit exceeded: {user_info} from IP {ip} - "
+                    f"More than {self.max_messages} messages in {self.time_window} seconds."
+                )
+                
+                # Return a 403 Forbidden response
+                return HttpResponseForbidden(
+                    f"You've sent too many messages. Please wait a moment before sending more."
+                )
+            
+            # Update the message count for this IP
+            current_time = time.time()
+            self.ip_message_counts[ip].append((current_time, 1))
+        
+        # Process the request if not rate limited
+        return self.get_response(request)
+    
+    def _get_client_ip(self, request):
+        """
+        Get the client's real IP address, accounting for proxy servers.
+        """
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            # Get the first IP in the list (client's real IP)
+            ip = x_forwarded_for.split(',')[0].strip()
+        else:
+            ip = request.META.get('REMOTE_ADDR')
+        return ip
