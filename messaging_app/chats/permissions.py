@@ -52,8 +52,11 @@ class IsMessageOwner(BasePermission):
         if request.method in permissions.SAFE_METHODS:
             return request.user in obj.conversation.participants.all()
         
-        # Write permissions only for message owner
-        return obj.sender == request.user
+        # Write permissions (POST, PUT, PATCH, DELETE) only for message owner
+        if request.method in ["POST", "PUT", "PATCH", "DELETE"]:
+            return obj.sender == request.user
+        
+        return False
 
 class IsConversationParticipant(BasePermission):
     """
@@ -102,7 +105,7 @@ class IsMessageParticipant(BasePermission):
         if not request.user or not request.user.is_authenticated or not request.user.is_active:
             return False
         
-        # For viewing messages, user must be participant in conversation
+        # For viewing messages (GET, HEAD, OPTIONS), user must be participant in conversation
         if request.method in permissions.SAFE_METHODS:
             return request.user in obj.conversation.participants.all()
         
@@ -110,5 +113,8 @@ class IsMessageParticipant(BasePermission):
         if request.method == 'POST':
             return request.user in obj.conversation.participants.all()
         
-        # For updating/deleting messages, user must be the sender
-        return obj.sender == request.user
+        # For updating/deleting messages (PUT, PATCH, DELETE), user must be the sender
+        if request.method in ["PUT", "PATCH", "DELETE"]:
+            return obj.sender == request.user
+        
+        return False
